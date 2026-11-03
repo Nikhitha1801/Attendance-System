@@ -203,7 +203,7 @@ function SlotCard({ slot, onStart, starting }) {
   )
 }
 
-export function LiveCapture({ session, onEnded }) {
+export function LiveCapture({ session, onEnded, autoCompleteAt = null, allowEarlyStop = false }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const overlayRef = useRef(null)
@@ -211,17 +211,20 @@ export function LiveCapture({ session, onEnded }) {
   const intervalRef = useRef(null)
   const captureInFlightRef = useRef(false)
   const autoEndedRef = useRef(false)
+  const completionStartedRef = useRef(false)
   const handleEndRef = useRef(null)
 
   const [cameraError, setCameraError] = useState(null)
   const [ipCamera, setIpCamera] = useState(false)
-  const [matched, setMatched] = useState([]) // {student_id, name, roll_no}
+  const [presentStudentIds, setPresentStudentIds] = useState([])
   const [presentCount, setPresentCount] = useState(0)
   const [roster, setRoster] = useState([])
   const [ending, setEnding] = useState(false)
   const [result, setResult] = useState(null)
   const [captureError, setCaptureError] = useState(null)
   const [detections, setDetections] = useState([]) // live bounding boxes from the last capture
+  const [autoSecondsRemaining, setAutoSecondsRemaining] = useState(null)
+  const [captureResolution, setCaptureResolution] = useState(null)
 
   useEffect(() => {
     listUsers({ role: 'student', section: session.section }).then(setRoster).catch(() => {})
@@ -271,15 +274,14 @@ export function LiveCapture({ session, onEnded }) {
       const frame = frameBitmap || video
       canvas.width = frameBitmap ? frameBitmap.width : video.videoWidth
       canvas.height = frameBitmap ? frameBitmap.height : video.videoHeight
+      setCaptureResolution(`${canvas.width} × ${canvas.height}`)
       const ctx = canvas.getContext('2d')
       ctx.drawImage(frame, 0, 0, canvas.width, canvas.height)
       const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
       const res = await captureAttendanceFrame(session.session_id, dataUrl)
       setPresentCount(res.present_count)
       setDetections(res.detections || [])
-      if (res.newly_matched.length > 0) {
-        setMatched((m) => [...res.newly_matched, ...m])
-      }
+      setPresentStudentIds(res.present_student_ids || [])
       setCaptureError(null)
     } catch (err) {
       setCaptureError(err.response?.data?.detail || 'Capture failed — will retry.')
@@ -351,9 +353,11 @@ export function LiveCapture({ session, onEnded }) {
     })
   }, [detections, ipCamera])
 
-  const matchedIds = new Set(matched.map((m) => m.student_id))
+  const presentIds = new Set(presentStudentIds)
 
   const handleEnd = async () => {
+    if (completionStartedRef.current) return
+    completionStartedRef.current = true
     setEnding(true)
     stopCamera()
     clearInterval(intervalRef.current)
@@ -362,18 +366,33 @@ export function LiveCapture({ session, onEnded }) {
       setResult(res)
     } catch (err) {
       setCaptureError(err.response?.data?.detail || 'Could not end class.')
+      completionStartedRef.current = false
       setEnding(false)
     }
   }
 
   handleEndRef.current = handleEnd
 
-  // Auto-complete: once the timetable slot's end time passes, end the
-  // class and send the report automatically — no button press needed.
+  // Auto mode ends after its fixed capture window; timetable kiosk sessions
+  // continue to use their configured window end time.
   useEffect(() => {
+    if (autoCompleteAt) {
+      const check = () => {
+        const remaining = Math.max(0, Math.ceil((autoCompleteAt - Date.now()) / 1000))
+        setAutoSecondsRemaining(remaining)
+        if (remaining === 0 && !autoEndedRef.current && !completionStartedRef.current) {
+          autoEndedRef.current = true
+          handleEndRef.current?.()
+        }
+      }
+      check()
+      const iv = setInterval(check, 1000)
+      return () => clearInterval(iv)
+    }
+
     if (!session.end_time) return
     const check = () => {
-      if (autoEndedRef.current) return
+      if (autoEndedRef.current || completionStartedRef.current) return
       const [h, m] = session.end_time.split(':').map(Number)
       const target = new Date()
       target.setHours(h, m, 0, 0)
@@ -385,7 +404,7 @@ export function LiveCapture({ session, onEnded }) {
     check()
     const iv = setInterval(check, 15000)
     return () => clearInterval(iv)
-  }, [session.end_time])
+  }, [session.end_time, autoCompleteAt])
 
   if (result) {
     return (
@@ -419,7 +438,13 @@ export function LiveCapture({ session, onEnded }) {
           <p className="text-sm text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
             <span>Live capture — faces recognized automatically every few seconds.</span>
             {session.room && <span className="flex items-center gap-1 text-slate-400"><DoorOpen className="w-3.5 h-3.5" /> {session.room}</span>}
-            {session.end_time && <span className="flex items-center gap-1 text-slate-400"><Clock className="w-3.5 h-3.5" /> Auto-ends at {session.end_time}</span>}
+            {autoCompleteAt && autoSecondsRemaining !== null ? (
+              <span className="flex items-center gap-1 font-medium text-emerald-700">
+                <Clock className="w-3.5 h-3.5" /> Auto Mode · report in {Math.floor(autoSecondsRemaining / 60)}:{String(autoSecondsRemaining % 60).padStart(2, '0')}
+              </span>
+            ) : session.end_time ? (
+              <span className="flex items-center gap-1 text-slate-400"><Clock className="w-3.5 h-3.5" /> Auto-ends at {session.end_time}</span>
+            ) : null}
           </p>
         </div>
         <div className="flex items-center gap-2 text-sm">
@@ -472,6 +497,30 @@ export function LiveCapture({ session, onEnded }) {
       )}
       {!ipCamera && <canvas ref={canvasRef} className="hidden" />}
 
+      {!cameraError && (
+        <div aria-live="polite" className="max-w-lg mx-auto w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-semibold text-ink-900">
+              {detections.length === 0
+                ? 'No faces detected in the latest frame'
+                : `${detections.length} face${detections.length === 1 ? '' : 's'} detected`}
+            </span>
+            <span className="text-slate-400">{captureResolution || 'Waiting for camera frame...'}</span>
+          </div>
+          {detections.length === 0 ? (
+            <p className="mt-1.5 text-slate-500">
+              Check that the camera shows the classroom, faces are visible and well lit, and each face is large enough in the frame.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-slate-500">
+              {detections.filter((face) => face.matched).length} confidently matched ·{' '}
+              {detections.filter((face) => !face.matched).length} not confidently matched.
+              {' '}Keep faces well lit and in view; students must be registered for face attendance.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-center gap-4 text-[11px] text-slate-400 flex-wrap">
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-500" /> Verifying it's really them</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Confirmed present</span>
@@ -482,7 +531,7 @@ export function LiveCapture({ session, onEnded }) {
         <div className="px-5 py-3 border-b border-slate-200 text-sm text-slate-500">Roster ({session.roster_size})</div>
         <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
           {roster.map((s) => {
-            const isPresent = matchedIds.has(s.student_profile?.id)
+            const isPresent = presentIds.has(s.student_profile?.id)
             return (
               <div key={s.id} className="flex items-center justify-between px-5 py-2.5">
                 <div>
@@ -500,19 +549,29 @@ export function LiveCapture({ session, onEnded }) {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto">
-        <button
-          onClick={handleEnd}
-          disabled={ending}
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-ink-900 to-slate-700 py-3 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          <Send className="w-4 h-4" /> {ending ? 'Ending...' : 'End Class & Send Report Now'}
-        </button>
-        <p className="text-xs text-slate-400 text-center mt-2">
-          Anyone not recognized by the camera will be marked absent, and the report emails itself automatically
-          {session.end_time ? ` — at the latest by ${session.end_time}, or end it early with this button.` : ' when class ends.'}
+      {autoCompleteAt && !allowEarlyStop ? (
+        <p className="max-w-lg mx-auto text-xs text-slate-400 text-center">
+          Auto Mode is active. The session closes after the 10-minute capture window, marks remaining roster members absent, and emails the report to faculty.
         </p>
-      </div>
+      ) : (
+        <div className="max-w-lg mx-auto">
+          <button
+            onClick={handleEnd}
+            disabled={ending}
+            className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-50 ${
+              autoCompleteAt ? 'bg-gradient-to-r from-red-700 to-rose-600' : 'bg-gradient-to-r from-ink-900 to-slate-700'
+            }`}
+          >
+            <Send className="w-4 h-4" /> {ending ? 'Ending...' : autoCompleteAt ? 'Stop Attendance & Send Report Now' : 'End Class & Send Report Now'}
+          </button>
+          <p className="text-xs text-slate-400 text-center mt-2">
+            Anyone not recognized by the camera will be marked absent, and the report emails itself automatically
+            {autoCompleteAt
+              ? ' when you stop the capture or the 10-minute window ends.'
+              : session.end_time ? ` — at the latest by ${session.end_time}, or end it early with this button.` : ' when class ends.'}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

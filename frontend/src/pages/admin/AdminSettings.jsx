@@ -70,7 +70,7 @@ export default function AdminSettings() {
             <label className="block text-xs text-slate-500 mb-1">Start after class begins (minutes)</label>
             <input
               type="number" min="0" max="60"
-              value={settings?.attendance_offset_minutes ?? 15}
+              value={settings?.attendance_offset_minutes ?? 0}
               onChange={(e) => setSettings((s) => ({ ...s, attendance_offset_minutes: e.target.value }))}
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-brand-500/50"
             />
@@ -79,7 +79,7 @@ export default function AdminSettings() {
             <label className="block text-xs text-slate-500 mb-1">Capture window length (minutes)</label>
             <input
               type="number" min="5" max="60"
-              value={settings?.attendance_window_minutes ?? 15}
+              value={settings?.attendance_window_minutes ?? 10}
               onChange={(e) => setSettings((s) => ({ ...s, attendance_window_minutes: e.target.value }))}
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-brand-500/50"
             />
@@ -96,7 +96,9 @@ export default function AdminSettings() {
           <span className="font-mono font-medium text-slate-700">
             {addMinutes(example.start, (Number(settings?.attendance_offset_minutes) || 0) + (Number(settings?.attendance_window_minutes) || 0))}
           </span>.
-          This applies uniformly to every class, on every Classroom Kiosk device, campus-wide.
+          Scheduled Auto Mode starts at the class start time and captures for 10 minutes by default.
+          Keep the administrator Classroom Kiosk page open in each room so it can activate the camera
+          automatically and email the report to the assigned faculty when capture ends.
         </div>
 
         <button type="submit" disabled={saving} className="flex items-center justify-center gap-2 w-full sm:w-auto rounded-xl bg-gradient-to-r from-brand-600 to-violet-600 hover:from-brand-500 hover:to-violet-500 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">

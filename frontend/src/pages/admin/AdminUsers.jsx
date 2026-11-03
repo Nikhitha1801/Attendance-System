@@ -174,6 +174,7 @@ function CreateUserModal({ departments, onClose, onCreated }) {
   const [form, setForm] = useState({
     name: '', email: '', password: 'Attendify@123', role: 'student',
     department_id: departments[0]?.id || '', roll_no: '', section: 'A', year: 1, designation: '',
+    parent_name: '', parent_email: '',
   })
   const [error, setError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
@@ -248,6 +249,8 @@ function CreateUserModal({ departments, onClose, onCreated }) {
               <Field label="Roll No" value={form.roll_no} onChange={set('roll_no')} required />
               <Field label="Section" value={form.section} onChange={set('section')} />
               <Field label="Year" type="number" value={form.year} onChange={set('year')} />
+              <Field label="Parent Name" value={form.parent_name} onChange={set('parent_name')} required />
+              <Field label="Parent Email" type="email" value={form.parent_email} onChange={set('parent_email')} required className="col-span-2" />
             </>
           )}
           {(form.role === 'faculty' || form.role === 'hod') && (
@@ -277,6 +280,8 @@ function EditUserModal({ user, departments, onClose, onSaved }) {
     section: user.student_profile?.section || 'A',
     year: user.student_profile?.year || 1,
     designation: user.faculty_profile?.designation || '',
+    parent_name: user.student_profile?.parent_name || '',
+    parent_email: user.student_profile?.parent_email || '',
   })
   const [error, setError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
@@ -298,6 +303,8 @@ function EditUserModal({ user, departments, onClose, onSaved }) {
         payload.roll_no = form.roll_no
         payload.section = form.section
         payload.year = Number(form.year)
+        payload.parent_name = form.parent_name
+        payload.parent_email = form.parent_email
       }
       if (user.role === 'faculty' || user.role === 'hod') {
         payload.designation = form.designation
@@ -348,6 +355,8 @@ function EditUserModal({ user, departments, onClose, onSaved }) {
               <Field label="Roll No" value={form.roll_no} onChange={set('roll_no')} required />
               <Field label="Section" value={form.section} onChange={set('section')} />
               <Field label="Year" type="number" value={form.year} onChange={set('year')} />
+              <Field label="Parent Name" value={form.parent_name} onChange={set('parent_name')} required />
+              <Field label="Parent Email" type="email" value={form.parent_email} onChange={set('parent_email')} required className="col-span-2" />
             </>
           )}
           {(user.role === 'faculty' || user.role === 'hod') && (

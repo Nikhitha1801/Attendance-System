@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Users, Building2, Camera, ClipboardList, Sparkles } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts'
+import { Link } from 'react-router-dom'
 import StatCard from '../../components/StatCard'
 import PortalBanner from '../../components/PortalBanner'
 import { getAdminDashboard } from '../../api/endpoints'
@@ -36,6 +37,11 @@ export default function AdminOverview() {
         subtitle="GSSSIETW · Attendify AI Attendance System"
         badge="AI-Powered"
         gradient="linear-gradient(135deg, #7c3aed, #4f46e5)"
+        action={
+          <Link to="/admin/attendance/start" className="hidden sm:inline-flex items-center gap-2 rounded-xl border border-white/25 bg-emerald-500/90 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-emerald-950/15 transition hover:bg-emerald-400">
+            <Camera className="w-4 h-4" /> Start Attendance
+          </Link>
+        }
       />
 
       {/* Stats */}
@@ -48,30 +54,30 @@ export default function AdminOverview() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="font-display font-semibold text-sm text-ink-900 mb-1">Weekly Attendance Trend</h2>
+        <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+          <h2 className="font-display font-semibold text-[15px] text-ink-900 mb-1">Weekly Attendance Trend</h2>
           <p className="text-xs text-slate-400 mb-4">Average across all departments</p>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={300}>
             <BarChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} />
-              <YAxis stroke="#94a3b8" fontSize={12} domain={[0, 100]} />
-              <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12 }} />
-              <Bar dataKey="percentage" fill="#5b7cfa" radius={[6, 6, 0, 0]} />
+              <CartesianGrid stroke="#edf0f5" vertical={false} />
+              <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
+              <YAxis stroke="#94a3b8" fontSize={11} domain={[0, 100]} tickLine={false} axisLine={false} />
+              <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, boxShadow: '0 8px 24px rgba(15,23,42,.10)' }} />
+              <Bar dataKey="percentage" fill="#4384f4" fillOpacity={0.18} stroke="#4384f4" strokeWidth={2} radius={[8, 8, 0, 0]} maxBarSize={62} />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="font-display font-semibold text-sm text-ink-900 mb-4">User Roles Distribution</h2>
-          <ResponsiveContainer width="100%" height={220}>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+          <h2 className="font-display font-semibold text-[15px] text-ink-900 mb-2">User Roles Distribution</h2>
+          <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie
                 data={data.role_distribution}
                 dataKey="count"
                 nameKey="role"
-                innerRadius={55}
-                outerRadius={85}
+                innerRadius={62}
+                outerRadius={98}
                 paddingAngle={2}
               >
                 {data.role_distribution.map((_, i) => (
@@ -79,7 +85,7 @@ export default function AdminOverview() {
                 ))}
               </Pie>
               <Tooltip contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
             </PieChart>
           </ResponsiveContainer>
         </div>

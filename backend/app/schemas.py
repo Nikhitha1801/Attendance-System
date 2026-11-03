@@ -42,6 +42,8 @@ class StudentProfileOut(BaseModel):
     section: str
     year: int
     face_registered: bool
+    parent_name: Optional[str] = None
+    parent_email: Optional[EmailStr] = None
 
     class Config:
         from_attributes = True
@@ -76,6 +78,8 @@ class UserUpdate(BaseModel):
     section: Optional[str] = None
     year: Optional[int] = None
     designation: Optional[str] = None
+    parent_name: Optional[str] = None
+    parent_email: Optional[EmailStr] = None
 
 
 class UserCreate(BaseModel):
@@ -88,6 +92,8 @@ class UserCreate(BaseModel):
     section: Optional[str] = "A"
     year: Optional[int] = 1
     designation: Optional[str] = None
+    parent_name: Optional[str] = None
+    parent_email: Optional[EmailStr] = None
 
 
 # ---------- Subject / Timetable ----------
@@ -209,6 +215,7 @@ class LiveSlotOut(BaseModel):
     end_time: str
     status: str  # "now" | "upcoming" | "past"
     is_swapped_in: bool  # true if you're covering this slot via an approved swap
+    faculty_name: Optional[str] = None
     existing_session_id: Optional[int] = None
     existing_session_status: Optional[str] = None
 
@@ -225,6 +232,7 @@ class SessionStartOut(BaseModel):
     roster_size: int
     room: str = ""
     end_time: str = ""
+    started_at: Optional[datetime] = None
 
 
 class CaptureRequest(BaseModel):
@@ -250,6 +258,7 @@ class FaceDetection(BaseModel):
 
 class CaptureResult(BaseModel):
     newly_matched: List[MatchedStudent]
+    present_student_ids: List[int] = []
     present_count: int
     roster_size: int
     faces_detected: int

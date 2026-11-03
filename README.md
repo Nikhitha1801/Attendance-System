@@ -25,6 +25,7 @@ Admin, HOD, Faculty and Student, with automatic multi-face attendance.
 
 ## Every day after that
 Only the two start commands (uvicorn, npm run dev). Do not run seed.py again.
+The backend applies additive database schema updates at startup; existing records are preserved.
 
 Login (all accounts): password `Attendify@123`
 admin@gsssietw.edu | hod.cse@gsssietw.edu | faculty1@gsssietw.edu | student@gsssietw.edu
@@ -42,12 +43,26 @@ admin@gsssietw.edu | hod.cse@gsssietw.edu | faculty1@gsssietw.edu | student@gsss
 
 ## Android IP Webcam
 - Connect the phone running IP Webcam and the computer running the backend to the same Wi-Fi network, then start the camera server in the phone app.
-- On the faculty dashboard, enter the snapshot link shown by IP Webcam (usually `http://PHONE_IP:8080/shot.jpg`) and connect before starting class. The address is used for that attendance session and is not saved.
+- In Admin -> Auto Attendance, enter the snapshot link shown by IP Webcam (usually `http://PHONE_IP:8080/shot.jpg`) and connect before starting. The address is used for that attendance session and is not saved.
 - The computer running the backend must be able to reach the phone. Otherwise, leave the link blank and use the browser's local camera.
 - Choose 1080p in the IP Webcam app and frame the room so each face is at least about 40 px wide. All visible faces are detected in each snapshot, but only enrolled students with a confident match are named; uncertain faces remain Unknown.
 
-## Automatic attendance (Classroom Kiosk)
-Open `/kiosk` once on the classroom PC and pick the room. Capture starts by itself at
-class start + 15 min, runs 15 min, then marks absentees and emails the faculty report.
-Timing is adjustable in Admin -> Settings. Email needs SMTP details in `backend/.env`
-(copy `.env.example`).
+## Admin-started attendance
+- Only an Admin can start or resume a class attendance session. From the Admin dashboard, choose **Start Attendance**, select today's timetable slot, and start the 10-minute capture.
+- The camera scans automatically during the capture window. At 10 minutes, the system marks remaining roster members absent, completes the session, and emails the report to the faculty assigned to that timetable slot.
+- Keep the capture page open until it finishes. Faculty can view their attendance and receive the emailed report, but cannot start a class.
+
+## Scheduled Auto Mode (Classroom Kiosk)
+- An Admin opens `/kiosk` on the computer located in the classroom, selects the room, grants camera access, and leaves the page open. The kiosk starts capture automatically when a timetable class begins; no faculty action is needed.
+- The default schedule starts capture at the class start time (0-minute offset), runs for 10 minutes, then marks absentees and emails the assigned faculty report. Timing is adjustable in Admin -> Settings.
+- Email needs SMTP details in `backend/.env` (copy `.env.example`).
+
+## Weekly student attendance and parent alerts
+- HOD and faculty dashboards show each relevant student's current Monday-to-date attendance. Rates below 85% are highlighted in red.
+- New student accounts require a parent name and email address. Add or update them in Admin -> Users -> Edit for existing students.
+- After each week closes, the backend checks the completed Monday-to-Sunday week and emails one warning per below-85% student. Failed deliveries are retried up to three times; duplicate successful alerts are suppressed.
+- Parent warnings use the same SMTP settings as faculty attendance reports in `backend/.env` (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and `SMTP_USE_TLS`). Email includes the student's weekly attendance percentage and advises the parent that their ward should attend classes regularly. Alerts remain disabled until SMTP is configured.
+
+## Recognition evaluation metrics
+- Accuracy, precision, and recall must come from a labeled evaluation set; training/enrollment photos are not a valid substitute.
+- No labeled evaluation set is currently included, so the project must not report invented metric values. Supply a labeled test set before these values can be calculated and displayed.

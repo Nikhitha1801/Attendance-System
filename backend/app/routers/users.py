@@ -2,6 +2,7 @@ import os
 import shutil
 from typing import Optional, List
 
+from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -13,6 +14,28 @@ from ..core.audit import log_action
 from ..core.face_engine import FACE_UPLOAD_DIR, train_recognizer
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _parent_contact(name: Optional[str], email: Optional[str]) -> tuple[str, str]:
+    parent_name = (name or "").strip()
+    if not parent_name:
+        raise HTTPException(status_code=400, detail="Parent name is required for students")
+    if len(parent_name) > 120:
+        raise HTTPException(status_code=400, detail="Parent name must be 120 characters or fewer")
+
+    try:
+        parent_email = validate_email(email or "", check_deliverability=False).normalized
+    except EmailNotValidError as error:
+        raise HTTPException(status_code=400, detail="Enter a valid parent email address") from error
+    return parent_name, parent_email
+
+
+def _user_out(user: models.User, include_parent_contact: bool) -> schemas.UserOut:
+    result = schemas.UserOut.model_validate(user)
+    if not include_parent_contact and result.student_profile:
+        result.student_profile.parent_name = None
+        result.student_profile.parent_email = None
+    return result
 
 
 @router.get("", response_model=List[schemas.UserOut])
@@ -37,7 +60,7 @@ def list_users(
             u for u in users
             if u.student_profile and u.student_profile.section == section
         ]
-    return users
+    return [_user_out(user, current_user.role == models.RoleEnum.admin) for user in users]
 
 
 @router.post("", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
@@ -54,6 +77,10 @@ def create_user(
     start" behavior for re-adding someone rather than an error, so admin
     doesn't have to manually delete-then-recreate every time.
     """
+    parent_name = parent_email = None
+    if payload.role == "student":
+        parent_name, parent_email = _parent_contact(payload.parent_name, payload.parent_email)
+
     replaced_note = None
 
     existing_by_email = db.query(models.User).filter(models.User.email == payload.email).first()
@@ -104,6 +131,8 @@ def create_user(
             roll_no=payload.roll_no,
             section=payload.section or "A",
             year=payload.year or 1,
+            parent_name=parent_name,
+            parent_email=parent_email,
         )
         db.add(profile)
     elif payload.role in ("faculty", "hod"):
@@ -165,6 +194,13 @@ def update_user(
             user.student_profile.section = payload.section
         if payload.year is not None:
             user.student_profile.year = payload.year
+        if payload.parent_name is not None or payload.parent_email is not None:
+            parent_name, parent_email = _parent_contact(
+                payload.parent_name if payload.parent_name is not None else user.student_profile.parent_name,
+                payload.parent_email if payload.parent_email is not None else user.student_profile.parent_email,
+            )
+            user.student_profile.parent_name = parent_name
+            user.student_profile.parent_email = parent_email
     elif user.faculty_profile and payload.designation is not None:
         user.faculty_profile.designation = payload.designation
 
@@ -211,4 +247,4 @@ def get_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return _user_out(user, current_user.role == models.RoleEnum.admin)

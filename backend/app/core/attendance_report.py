@@ -26,75 +26,85 @@ def build_attendance_workbook(
     absent_students: List[Dict[str, str]],
 ) -> bytes:
     workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Attendance"
     report_time = datetime.now().strftime("%H:%M")
     total = len(present_students) + len(absent_students)
+    absent_count = len(absent_students)
     attendance_pct = (len(present_students) / total * 100) if total else 0
 
-    for status, students, title_color, summary_color, row_color in (
-        ("Present", present_students, "008F68", "E8F8F1", "E8F8F1"),
-        ("Absent", absent_students, "D92525", "FFF0F0", "FCE4E4"),
-    ):
-        sheet = workbook.active if status == "Present" else workbook.create_sheet()
-        sheet.title = status
-        sheet.merge_cells("A1:I1")
-        sheet["A1"] = f"GSSSIETW — Attendance Report ({status})"
-        sheet["A1"].fill = PatternFill("solid", fgColor="183B64")
-        sheet["A1"].font = Font(color="FFFFFF", bold=True, size=14)
-        sheet["A1"].alignment = Alignment(horizontal="center")
+    sheet.merge_cells("A1:I1")
+    sheet["A1"] = "GSSSIETW — Attendance Report"
+    sheet["A1"].fill = PatternFill("solid", fgColor="183B64")
+    sheet["A1"].font = Font(color="FFFFFF", bold=True, size=14)
+    sheet["A1"].alignment = Alignment(horizontal="center")
 
-        sheet.merge_cells("A2:I2")
-        sheet["A2"] = f"Course: {subject_code} — {subject_name}"
-        sheet["A2"].fill = PatternFill("solid", fgColor="2864DC")
-        sheet["A2"].font = Font(color="FFFFFF", bold=True)
-        sheet["A2"].alignment = Alignment(horizontal="center")
+    sheet.merge_cells("A2:I2")
+    sheet["A2"] = f"Course: {subject_code} — {subject_name}"
+    sheet["A2"].fill = PatternFill("solid", fgColor="2864DC")
+    sheet["A2"].font = Font(color="FFFFFF", bold=True)
+    sheet["A2"].alignment = Alignment(horizontal="center")
 
-        sheet.merge_cells("A3:I3")
-        sheet["A3"] = (
-            f"Faculty: {faculty_name}   |   Dept: {department or '—'}   |   "
-            f"Date: {session_date}   |   Time: {report_time}"
-        )
-        sheet["A3"].fill = PatternFill("solid", fgColor="DCE9FF")
-        sheet["A3"].font = Font(bold=True, color="243B5A")
-        sheet["A3"].alignment = Alignment(horizontal="center")
+    sheet.merge_cells("A3:I3")
+    sheet["A3"] = (
+        f"Faculty: {faculty_name}   |   Dept: {department or '—'}   |   "
+        f"Date: {session_date}   |   Time: {report_time}"
+    )
+    sheet["A3"].fill = PatternFill("solid", fgColor="DCE9FF")
+    sheet["A3"].font = Font(bold=True, color="243B5A")
+    sheet["A3"].alignment = Alignment(horizontal="center")
 
-        sheet.merge_cells("A4:I4")
-        sheet["A4"] = (
-            f"Total {status}: {len(students)}   |   Total Enrolled: {total}   |   "
-            f"Attendance: {attendance_pct:.1f}%"
-        )
-        sheet["A4"].fill = PatternFill("solid", fgColor=summary_color)
-        sheet["A4"].font = Font(bold=True, color="243B5A")
-        sheet["A4"].alignment = Alignment(horizontal="center")
+    sheet.merge_cells("A4:I4")
+    sheet["A4"] = (
+        f"Present: {len(present_students)}   |   Absent: {absent_count}   |   "
+        f"Total Enrolled: {total}   |   Attendance: {attendance_pct:.1f}%"
+    )
+    sheet["A4"].fill = PatternFill("solid", fgColor="E8F0F8")
+    sheet["A4"].font = Font(bold=True, color="243B5A")
+    sheet["A4"].alignment = Alignment(horizontal="center")
 
-        for index, header in enumerate(HEADERS, start=1):
-            cell = sheet.cell(row=5, column=index, value=header)
-            cell.fill = PatternFill("solid", fgColor=title_color)
-            cell.font = Font(color="FFFFFF", bold=True)
+    for index, header in enumerate(HEADERS, start=1):
+        cell = sheet.cell(row=5, column=index, value=header)
+        cell.fill = PatternFill("solid", fgColor="2864DC")
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    all_students = [
+        (student, "PRESENT") for student in present_students
+    ] + [
+        (student, "ABSENT") for student in absent_students
+    ]
+    all_students.sort(key=lambda item: str(item[0]["roll_no"]).casefold())
+
+    for row_number, (student, status) in enumerate(all_students, start=1):
+        values = [
+            row_number,
+            student["roll_no"],
+            student["name"],
+            student["department"] or "—",
+            student.get("semester") or "—",
+            section,
+            status,
+            session_date,
+            report_time,
+        ]
+        row_color = "E8F8F1" if status == "PRESENT" else "FCE4E4"
+        for column, value in enumerate(values, start=1):
+            cell = sheet.cell(row=row_number + 5, column=column, value=value)
+            cell.fill = PatternFill("solid", fgColor=row_color)
             cell.alignment = Alignment(horizontal="center", vertical="center")
+            if column == 7:
+                cell.font = Font(
+                    color="087f5b" if status == "PRESENT" else "c62828",
+                    bold=True,
+                )
 
-        for row_number, student in enumerate(students, start=1):
-            values = [
-                row_number,
-                student["roll_no"],
-                student["name"],
-                student["department"] or "—",
-                student.get("semester") or "—",
-                section,
-                status.upper(),
-                session_date,
-                report_time,
-            ]
-            for column, value in enumerate(values, start=1):
-                cell = sheet.cell(row=row_number + 5, column=column, value=value)
-                cell.fill = PatternFill("solid", fgColor=row_color)
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-
-        sheet.freeze_panes = "A6"
-        sheet.auto_filter.ref = f"A5:I{max(5, len(students) + 5)}"
-        for column, width in enumerate(WIDTHS, start=1):
-            sheet.column_dimensions[get_column_letter(column)].width = width
-        for row in range(1, len(students) + 6):
-            sheet.row_dimensions[row].height = 22
+    sheet.freeze_panes = "A6"
+    sheet.auto_filter.ref = f"A5:I{max(5, len(all_students) + 5)}"
+    for column, width in enumerate(WIDTHS, start=1):
+        sheet.column_dimensions[get_column_letter(column)].width = width
+    for row in range(1, len(all_students) + 6):
+        sheet.row_dimensions[row].height = 22
 
     output = io.BytesIO()
     workbook.save(output)

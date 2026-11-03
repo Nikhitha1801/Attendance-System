@@ -14,11 +14,12 @@ import logging
 from datetime import datetime
 from html import escape
 from email.message import EmailMessage
+from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 logger = logging.getLogger("attendify.email")
 
@@ -49,6 +50,50 @@ def _send_message(msg: EmailMessage, to_email: str, notification: str) -> bool:
     except Exception:
         logger.exception("Failed to send %s email to %s", notification, to_email)
         return False
+
+
+def send_parent_attendance_warning(
+    *,
+    to_email: str,
+    parent_name: str,
+    student_name: str,
+    percentage: float,
+    week_start: str,
+    week_end: str,
+) -> bool:
+    if not is_configured():
+        logger.warning("SMTP not configured; skipping weekly parent attendance email to %s", to_email)
+        return False
+
+    week_range = f"{week_start} to {week_end}"
+    msg = EmailMessage()
+    msg["Subject"] = f"[Attendify] Attendance warning for {student_name}"
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    msg.set_content(
+        f"Dear {parent_name},\n\n"
+        f"Your ward {student_name}'s attendance for {week_range} is {percentage:.1f}%, "
+        "which is below 85%. Your ward is advised to attend classes regularly.\n\n"
+        "Attendify"
+    )
+    msg.add_alternative(
+        f"""\
+<html><body style="margin:0;padding:24px;background:#f3f6fa;font-family:Arial,sans-serif;color:#243247;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;border-collapse:collapse;">
+    <tr><td style="padding:24px 30px;background:#24539a;color:#fff;"><div style="font-size:12px;">GSSSIETW</div><h2 style="margin:8px 0 0;">Weekly attendance reminder</h2></td></tr>
+    <tr><td style="padding:28px 30px;">
+      <p>Dear {escape(parent_name)},</p>
+      <p>Your ward <strong>{escape(student_name)}</strong>'s attendance for {escape(week_range)} is:</p>
+      <p style="padding:16px;background:#fef2f2;border-radius:8px;color:#b91c1c;font-size:24px;font-weight:bold;">{percentage:.1f}%</p>
+      <p>This is below the required 85%. Your ward is advised to attend classes regularly.</p>
+      <p style="margin-top:24px;color:#94a3b8;font-size:12px;">Sent automatically by Attendify.</p>
+    </td></tr>
+  </table>
+</body></html>
+""",
+        subtype="html",
+    )
+    return _send_message(msg, to_email, "weekly parent attendance warning")
 
 
 def send_swap_request_email(

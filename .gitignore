@@ -60,6 +60,17 @@ backend/session_photos/
 backend/face_model/gallery.npz
 backend/face_model/labels.json
 
+# Local model evaluation images and labels (keep the dataset instructions)
+backend/eval_data/
+!backend/eval_data/
+backend/eval_data/*
+!backend/eval_data/detection/
+!backend/eval_data/recognition/
+backend/eval_data/detection/*
+!backend/eval_data/detection/README.txt
+backend/eval_data/recognition/*
+!backend/eval_data/recognition/README.txt
+
 # Model weights and generated model files
 *.pt
 *.pth

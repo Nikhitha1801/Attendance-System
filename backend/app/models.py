@@ -74,8 +74,8 @@ class SystemSettings(Base):
     # Automatic attendance: capture begins this many minutes after each
     # class's scheduled start, and runs for this many minutes before
     # auto-completing and emailing the report -- no faculty action needed.
-    attendance_offset_minutes = Column(Integer, default=15)
-    attendance_window_minutes = Column(Integer, default=15)
+    attendance_offset_minutes = Column(Integer, default=0)
+    attendance_window_minutes = Column(Integer, default=10)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -120,9 +120,17 @@ class StudentProfile(Base):
     section = Column(String, nullable=False, default="A")
     year = Column(Integer, nullable=False, default=1)
     face_registered = Column(Boolean, default=False)
+    parent_name = Column(String, nullable=True)
+    parent_email = Column(String, nullable=True)
+    parent_mobile = Column(String, nullable=True)
 
     user = relationship("User", back_populates="student_profile")
     attendance_records = relationship("AttendanceRecord", back_populates="student")
+    parent_attendance_alerts = relationship(
+        "ParentAttendanceAlert",
+        back_populates="student",
+        cascade="all, delete-orphan",
+    )
 
 
 class FacultyProfile(Base):
@@ -208,6 +216,24 @@ class AttendanceRecord(Base):
 
     session = relationship("AttendanceSession", back_populates="records")
     student = relationship("StudentProfile", back_populates="attendance_records")
+
+
+class ParentAttendanceAlert(Base):
+    __tablename__ = "parent_attendance_alerts"
+    __table_args__ = (
+        UniqueConstraint("student_id", "week_start", name="uq_parent_alert_student_week"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("student_profiles.id"), nullable=False)
+    week_start = Column(Date, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    last_attempt_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+    last_error = Column(String, default="")
+
+    student = relationship("StudentProfile", back_populates="parent_attendance_alerts")
 
 
 class SwapRequest(Base):

@@ -1,0 +1,2 @@
+# Optional dependency for comparing MediaPipe face detection with SCRFD.
+mediapipe==0.10.21

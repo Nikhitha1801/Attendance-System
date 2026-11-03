@@ -1,15 +1,62 @@
 from collections import defaultdict
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import or_
 
 from .. import models
 from ..database import get_db
 from ..core.deps import require_roles, get_current_user
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+def _weekly_student_attendance(
+    db: Session,
+    week_start: date,
+    week_end: date,
+    *,
+    department_id: int = None,
+    faculty_id: int = None,
+):
+    query = (
+        db.query(models.AttendanceRecord)
+        .join(models.AttendanceSession)
+        .join(models.StudentProfile)
+        .join(models.User, models.StudentProfile.user_id == models.User.id)
+        .filter(
+            models.AttendanceSession.session_date >= week_start,
+            models.AttendanceSession.session_date <= week_end,
+        )
+    )
+    if department_id is not None:
+        query = query.filter(models.User.department_id == department_id)
+    if faculty_id is not None:
+        query = query.filter(models.AttendanceSession.faculty_id == faculty_id)
+
+    students = {}
+    for record in query.all():
+        profile = record.student
+        student = students.setdefault(profile.id, {
+            "student_id": profile.id,
+            "name": profile.user.name,
+            "roll_no": profile.roll_no,
+            "section": profile.section,
+            "present": 0,
+            "total": 0,
+        })
+        student["total"] += 1
+        if record.status == models.AttendanceStatus.present:
+            student["present"] += 1
+
+    return [
+        {
+            **student,
+            "percentage": round(student["present"] / student["total"] * 100, 1),
+        }
+        for student in sorted(students.values(), key=lambda item: (item["section"], item["name"]))
+    ]
 
 
 @router.get("/admin")
@@ -88,6 +135,8 @@ def hod_dashboard(
     current_user: models.User = Depends(require_roles("hod")),
 ):
     dept_id = current_user.department_id
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
     students = (
         db.query(models.User)
         .filter(models.User.department_id == dept_id, models.User.role == "student")
@@ -98,19 +147,31 @@ def hod_dashboard(
         .filter(models.User.department_id == dept_id, models.User.role == "faculty")
         .count()
     )
-    subjects = db.query(models.Subject).filter(models.Subject.department_id == dept_id).count()
+    subjects = (
+        db.query(models.Subject)
+        .outerjoin(models.TimetableEntry)
+        .outerjoin(models.User, models.TimetableEntry.faculty_id == models.User.id)
+        .filter(
+            or_(
+                models.Subject.department_id == dept_id,
+                models.User.department_id == dept_id,
+            )
+        )
+        .distinct()
+        .count()
+    )
 
     # Weekly attendance trend for department (last 7 days)
     trend = []
-    today = date.today()
     for i in range(6, -1, -1):
         day = today - timedelta(days=i)
         records = (
             db.query(models.AttendanceRecord)
             .join(models.AttendanceSession)
-            .join(models.Subject)
+            .join(models.StudentProfile)
+            .join(models.User, models.StudentProfile.user_id == models.User.id)
             .filter(
-                models.Subject.department_id == dept_id,
+                models.User.department_id == dept_id,
                 models.AttendanceSession.session_date == day,
             )
             .all()
@@ -125,6 +186,13 @@ def hod_dashboard(
         "faculty": faculty,
         "subjects": subjects,
         "weekly_trend": trend,
+        "attendance_week": {
+            "start": week_start.isoformat(),
+            "end": today.isoformat(),
+            "students": _weekly_student_attendance(
+                db, week_start, today, department_id=dept_id
+            ),
+        },
     }
 
 
@@ -133,6 +201,8 @@ def faculty_dashboard(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_roles("faculty", "hod")),
 ):
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
     today_dow = date.today().weekday()
     today_classes = (
         db.query(models.TimetableEntry)
@@ -152,6 +222,13 @@ def faculty_dashboard(
     )
 
     return {
+        "attendance_week": {
+            "start": week_start.isoformat(),
+            "end": today.isoformat(),
+            "students": _weekly_student_attendance(
+                db, week_start, today, faculty_id=current_user.id
+            ),
+        },
         "today_classes": [
             {
                 "id": c.id,
@@ -183,16 +260,33 @@ def student_dashboard(
     current_user: models.User = Depends(require_roles("student")),
 ):
     profile = current_user.student_profile
+    if not profile:
+        raise HTTPException(status_code=400, detail="No student profile found")
+
     records = (
         db.query(models.AttendanceRecord)
         .filter(models.AttendanceRecord.student_id == profile.id)
         .all()
     )
     total = len(records)
-    present = len([r for r in records if r.status.value == "present"])
+    present = sum(r.status == models.AttendanceStatus.present for r in records)
     pct = round((present / total * 100), 1) if total else 0
 
     recent = sorted(records, key=lambda r: r.marked_at, reverse=True)[:5]
+    return {
+        "overall_percentage": pct,
+        "present_count": present,
+        "total_sessions": total,
+        "face_registered": bool(profile.face_registered),
+        "recent": [
+            {
+                "subject": record.session.subject.name,
+                "date": record.session.session_date.isoformat(),
+                "status": record.status.value,
+            }
+            for record in recent
+        ],
+    }
 
 @router.get("/admin/analytics")
 def admin_analytics(
@@ -264,8 +358,10 @@ def hod_analytics(
         db.query(models.AttendanceRecord)
         .join(models.AttendanceSession)
         .join(models.Subject)
+        .join(models.StudentProfile)
+        .join(models.User, models.StudentProfile.user_id == models.User.id)
         .filter(
-            models.Subject.department_id == current_user.department_id,
+            models.User.department_id == current_user.department_id,
             models.AttendanceSession.session_date >= start_date,
             models.AttendanceSession.session_date <= today,
         )

@@ -4,8 +4,9 @@ import axios from 'axios'
 // instead of hardcoding 'localhost', so this works whether you open the
 // app locally or from another device on the network.
 const apiHost = window.location.hostname
+const apiPort = import.meta.env.VITE_API_PORT || '8000'
 const client = axios.create({
-  baseURL: `http://${apiHost}:8000`,
+  baseURL: `http://${apiHost}:${apiPort}`,
 })
 
 client.interceptors.request.use((config) => {

@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -193,45 +193,25 @@ def _compute_student_summary(db: Session, student_id: int) -> List[schemas.Stude
 @router.get("/live-slot", response_model=List[schemas.LiveSlotOut])
 def get_live_slots(
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_roles("faculty", "hod")),
+    current_user: models.User = Depends(require_roles("admin")),
 ):
-    """Today's timetable slots this faculty member should teach -- their own,
-    plus any they're covering via an approved swap -- each flagged with
-    whether it's happening right now, upcoming, or already past."""
+    """Today's timetable slots, available to admins for attendance management."""
     today = date.today()
     weekday = today.weekday()
 
-    owned = (
+    entries = (
         db.query(models.TimetableEntry)
         .filter(models.TimetableEntry.day_of_week == weekday)
-        .filter(models.TimetableEntry.faculty_id == current_user.id)
+        .order_by(models.TimetableEntry.start_time)
         .all()
     )
-
-    covering = (
-        db.query(models.TimetableEntry)
-        .join(models.SwapRequest, models.SwapRequest.timetable_entry_id == models.TimetableEntry.id)
-        .filter(
-            models.TimetableEntry.day_of_week == weekday,
-            models.SwapRequest.target_faculty_id == current_user.id,
-            models.SwapRequest.swap_date == today,
-            models.SwapRequest.status == models.SwapStatus.approved,
-        )
-        .all()
-    )
-    covering_ids = {e.id for e in covering}
-
-    # Drop owned slots that were swapped away to someone else today.
-    visible_owned = []
-    for entry in owned:
-        effective = _effective_faculty_id(db, entry, today)
-        if effective == current_user.id:
-            visible_owned.append(entry)
-
-    all_entries = visible_owned + [e for e in covering if e.id not in {x.id for x in visible_owned}]
 
     results = []
-    for entry in all_entries:
+    for entry in entries:
+        effective_faculty_id = _effective_faculty_id(db, entry, today)
+        effective_faculty = db.query(models.User).filter(
+            models.User.id == effective_faculty_id
+        ).first()
         session = (
             db.query(models.AttendanceSession)
             .filter(
@@ -250,12 +230,12 @@ def get_live_slots(
                 start_time=entry.start_time,
                 end_time=entry.end_time,
                 status=_slot_status(entry.start_time, entry.end_time),
-                is_swapped_in=entry.id in covering_ids,
+                is_swapped_in=effective_faculty_id != entry.faculty_id,
+                faculty_name=effective_faculty.name if effective_faculty else None,
                 existing_session_id=session.id if session else None,
                 existing_session_status=session.status.value if session else None,
             )
         )
-    results.sort(key=lambda r: r.start_time)
     return results
 
 
@@ -263,7 +243,7 @@ def get_live_slots(
 def start_class_session(
     payload: schemas.SessionStartRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_roles("faculty", "hod")),
+    current_user: models.User = Depends(require_roles("admin")),
 ):
     entry = (
         db.query(models.TimetableEntry)
@@ -275,7 +255,7 @@ def start_class_session(
 
     today = date.today()
     effective_faculty_id = _effective_faculty_id(db, entry, today)
-    if effective_faculty_id != current_user.id:
+    if current_user.role.value != "admin" and effective_faculty_id != current_user.id:
         raise HTTPException(
             status_code=403,
             detail="This slot isn't assigned to you today (check swap requests if you expected otherwise).",
@@ -307,6 +287,11 @@ def _start_or_get_session(db: Session, entry: models.TimetableEntry, faculty_id:
             roster_size=len(roster),
             room=entry.room,
             end_time=entry.end_time,
+            started_at=(
+                existing.started_at.replace(tzinfo=timezone.utc)
+                if existing.started_at and existing.started_at.tzinfo is None
+                else existing.started_at
+            ),
         )
 
     session = models.AttendanceSession(
@@ -330,6 +315,7 @@ def _start_or_get_session(db: Session, entry: models.TimetableEntry, faculty_id:
         roster_size=len(roster),
         room=entry.room,
         end_time=entry.end_time,
+        started_at=session.started_at.replace(tzinfo=timezone.utc),
     )
 
 
@@ -337,7 +323,7 @@ def _start_or_get_session(db: Session, entry: models.TimetableEntry, faculty_id:
 def auto_start_class_session(
     payload: schemas.SessionStartRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_roles("faculty", "hod", "admin")),
+    current_user: models.User = Depends(require_roles("admin")),
 ):
     """
     Used by an unattended Classroom Kiosk page -- the device stays logged in
@@ -577,6 +563,7 @@ def capture_attendance_frame(
 
     return schemas.CaptureResult(
         newly_matched=newly_matched,
+        present_student_ids=sorted(already_present_ids),
         present_count=len(already_present_ids),
         roster_size=len(roster),
         faces_detected=len(all_detections),
@@ -598,6 +585,43 @@ def complete_class_session(
         raise HTTPException(status_code=403, detail="Not your session")
 
     roster = _section_roster(db, session.section)
+
+    # Atomically claim completion so a manual stop, the capture timer, or a
+    # retried request cannot finalize the same session or send its report twice.
+    claimed = (
+        db.query(models.AttendanceSession)
+        .filter(
+            models.AttendanceSession.id == session_id,
+            models.AttendanceSession.status == models.SessionStatus.live,
+        )
+        .update(
+            {
+                models.AttendanceSession.status: models.SessionStatus.completed,
+                models.AttendanceSession.ended_at: datetime.utcnow(),
+            },
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        db.rollback()
+        db.refresh(session)
+        if session.status != models.SessionStatus.completed:
+            raise HTTPException(status_code=400, detail="This class session is not live")
+
+        present_count = sum(
+            1 for record in session.records
+            if record.status == models.AttendanceStatus.present
+        )
+        return schemas.SessionCompleteOut(
+            session_id=session.id,
+            present_count=present_count,
+            absent_count=max(0, len(roster) - present_count),
+            roster_size=len(roster),
+            report_emailed=session.report_emailed,
+            email_note="Attendance was already finalized; no additional report was sent.",
+        )
+
+    session.status = models.SessionStatus.completed
     existing_record_student_ids = {r.student_id for r in session.records}
 
     for user in roster:
@@ -610,8 +634,6 @@ def complete_class_session(
                 method="auto",
             ))
 
-    session.status = models.SessionStatus.completed
-    session.ended_at = datetime.utcnow()
     db.commit()
     db.refresh(session)
 
@@ -627,7 +649,11 @@ def complete_class_session(
             "name": user.name,
             "roll_no": user.student_profile.roll_no,
             "department": user.department.code if user.department else "",
-            "semester": "",
+            "semester": str(
+                session.timetable_entry.semester
+                if session.timetable_entry and session.timetable_entry.semester is not None
+                else session.subject.semester
+            ),
         }
         if record and record.status == models.AttendanceStatus.present:
             present_names.append(label)

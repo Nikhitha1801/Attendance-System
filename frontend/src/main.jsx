@@ -32,7 +32,8 @@ import HodReports from './pages/hod/HodReports.jsx'
 import HodSwapRequests from './pages/hod/HodSwapRequests.jsx'
 
 import FacultyOverview from './pages/faculty/FacultyOverview.jsx'
-import TakeAttendance from './pages/faculty/TakeAttendance.jsx'
+import FacultyAttendanceNotice from './pages/faculty/FacultyAttendanceNotice.jsx'
+import AdminAutoAttendance from './pages/admin/AdminAutoAttendance.jsx'
 import FacultyTimetable from './pages/faculty/FacultyTimetable.jsx'
 import FacultyAttendanceLog from './pages/faculty/FacultyAttendanceLog.jsx'
 import FacultyReports from './pages/faculty/FacultyReports.jsx'
@@ -59,7 +60,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route
             path="/kiosk"
             element={
-              <ProtectedRoute roles={['admin', 'hod']}>
+              <ProtectedRoute roles={['admin']}>
                 <ClassroomKiosk />
               </ProtectedRoute>
             }
@@ -79,6 +80,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             <Route path="subjects" element={<AdminSubjects />} />
             <Route path="classrooms" element={<AdminClassrooms />} />
             <Route path="timetable" element={<AdminTimetable />} />
+            <Route path="attendance/start" element={<AdminAutoAttendance />} />
             <Route path="attendance" element={<AdminAttendance />} />
             <Route path="reports" element={<AdminReports />} />
             <Route path="analytics" element={<AdminAnalytics />} />
@@ -114,7 +116,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             }
           >
             <Route index element={<FacultyOverview />} />
-            <Route path="attendance" element={<TakeAttendance />} />
+            <Route path="attendance" element={<FacultyAttendanceNotice />} />
             <Route path="timetable" element={<FacultyTimetable />} />
             <Route path="log" element={<FacultyAttendanceLog />} />
             <Route path="reports" element={<FacultyReports />} />
